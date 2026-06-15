@@ -1,0 +1,37 @@
+# Binaries
+meshweb-gui/build/bin/
+*.exe
+*.dll
+
+# Go
+*.sum
+vendor/
+
+# Node
+node_modules/
+meshweb-gui/frontend/dist/
+meshweb-gui/frontend/node_modules/
+
+# Wails
+meshweb-gui/build/windows/
+wailsjs/
+
+# User data
+bootstrap.json
+identity.key
+balance.json
+*.meshweb
+storage/
+downloads.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
