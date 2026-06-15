@@ -32,7 +32,7 @@ The internet was originally conceived as a decentralized network, yet modern inf
 
 Meshweb is engineered under a strict core philosophy:
 
-- **Absolute Decentralization.** There are zero centralized servers. The only infrastructure dependency is a public relay node for NAT traversal, which can be replaced or multiplied by any participant.
+- **Absolute Decentralization.** There are zero centralized servers. Relay nodes used for NAT traversal are interchangeable and can be operated by any participant.
 - **Resilience.** The protocol is designed to be unkillable. Data survives even when 66% of hosting nodes go offline simultaneously.
 - **Autonomy.** Meshweb functions entirely without human intervention, maintaining its operations even in the absence of its creators.
 - **Progressive Strength.** The network's capacity, redundancy, and routing efficiency scale with every new node that joins.
@@ -92,11 +92,11 @@ The foundation of Meshweb is a robust, censorship-resistant peer-to-peer network
 
 **NAT Traversal Strategy:**
 1. Node attempts direct connection via TCP/QUIC.
-2. If blocked, AutoRelay activates with static relay servers.
+2. If blocked, AutoRelay activates with available relay nodes.
 3. HolePunching is attempted for direct peer-to-peer path.
 4. If all else fails, Circuit Relay v2 provides guaranteed connectivity.
 
-The current relay server (`/ip4/185.177.116.13/tcp/443/p2p/12D3KooW...`) is a bootstrap facilitator, not a single point of failure — any node can run a relay.
+Any node in the network can serve as a relay. There is no privileged infrastructure.
 
 ### 4.2 Layer 2: Discovery (Kademlia DHT)
 
@@ -294,7 +294,7 @@ BIP39 Entropy (128 bits)
         ▼
 ┌───────────────────┐
 │ LibP2P Peer ID     │  Derived from public key
-│                    │  Format: 12D3KooW...
+│                    │  Unique network identifier
 └───────────────────┘
 ```
 
@@ -304,15 +304,15 @@ BIP39 Entropy (128 bits)
 |---|---|
 | Mnemonic | BIP39, 12 words, 128-bit entropy |
 | Key Algorithm | Ed25519 |
-| Peer ID | LibP2P peer.IDFromPrivateKey |
-| Storage | Encrypted JSON at `%APPDATA%/meshweb-gui/identity.key` |
-| Backup | Export seed phrase or identity.json |
+| Peer ID | Derived from public key |
+| Storage | Encrypted JSON in local application data directory |
+| Backup | Export seed phrase or identity file |
 | Recovery | Full identity restoration from 12 words |
-| Portability | Same seed phrase → same Peer ID on any device |
+| Portability | Same seed phrase → same identity on any device |
 
 ### 6.3 Security
 
-- Private keys are stored locally with restrictive file permissions (0600).
+- Private keys are stored locally with restrictive file permissions.
 - The seed phrase is the master secret — losing it means losing the identity permanently.
 - No central registry exists. Identity ownership is proven cryptographically.
 
@@ -352,9 +352,9 @@ A `.meshweb` file is a JSON metadata file containing:
   "min_shards": 10,
   "encryption": "AES-256-GCM",
   "key_hash": "a1b2c3...",
-  "aes_key": "deadbeef...",
-  "created_at": "2026-06-15T10:30:00Z",
-  "creator_id": "12D3KooW..."
+  "aes_key": "<hex-encoded key>",
+  "created_at": "<ISO 8601 timestamp>",
+  "creator_id": "<peer ID>"
 }
 ```
 
@@ -443,7 +443,7 @@ Meshweb will operate on **MWCoin**, a utility token designed to power the comput
 
 | Threat | Mitigation |
 |---|---|
-| Identity theft | Ed25519 private key stored locally with 0600 permissions |
+| Identity theft | Ed25519 private key stored locally with restrictive permissions |
 | Key loss | BIP39 seed phrase enables full recovery on any device |
 | Impersonation | Peer ID is cryptographically bound to Ed25519 public key |
 
@@ -451,7 +451,6 @@ Meshweb will operate on **MWCoin**, a utility token designed to power the comput
 
 - **No shard replication protocol.** Currently, shards are stored only on the uploader's node. Multi-node distribution requires the uploader to remain online.
 - **No incentive for storage.** Nodes store their own files but lack economic incentive to store others' data (awaiting MWCoin).
-- **Single relay dependency.** While architecturally any node can relay, the current deployment uses one relay server.
 - **No data persistence guarantees.** If the uploading node goes offline permanently and no other node has the shards, the file is lost.
 
 ---
@@ -493,7 +492,7 @@ Meshweb will operate on **MWCoin**, a utility token designed to power the comput
 - [ ] Shard replication protocol (automatic re-replication on node departure)
 - [ ] Mac and Linux desktop builds
 - [ ] File pinning and persistence guarantees
-- [ ] Multiple relay servers
+- [ ] Expanded relay infrastructure
 
 ### Phase 3: Economy (v0.3.0)
 - [ ] MWCoin mainnet launch
