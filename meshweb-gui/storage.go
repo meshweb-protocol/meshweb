@@ -28,27 +28,31 @@ import (
 const StorageProtocolID protocol.ID = "/meshweb/storage/1.0.0"
 
 type MeshwebFile struct {
-	Version      string `json:"version"`
-	FileName     string `json:"file_name"`
-	FileSize     int64  `json:"file_size"`
-	OriginalSize int    `json:"original_size"` // len(ciphertext) before RS padding
-	FileID       string `json:"file_id"`
-	Shards       int    `json:"shards"`
-	MinShards    int    `json:"min_shards"`
-	Encryption   string `json:"encryption"`
-	KeyHash      string `json:"key_hash"`
-	AESKey       string `json:"aes_key,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	CreatorID    string `json:"creator_id"`
-	LocalPath    string `json:"local_path,omitempty"`
+	Version      string        `json:"version"`
+	Type         string        `json:"type,omitempty"` // "folder" or empty for file
+	FileName     string        `json:"file_name"`
+	FileSize     int64         `json:"file_size"`
+	OriginalSize int           `json:"original_size"` // len(ciphertext) before RS padding
+	FileID       string        `json:"file_id"`
+	Shards       int           `json:"shards"`
+	MinShards    int           `json:"min_shards"`
+	Encryption   string        `json:"encryption"`
+	KeyHash      string        `json:"key_hash"`
+	AESKey       string        `json:"aes_key,omitempty"`
+	CreatedAt    string        `json:"created_at"`
+	CreatorID    string        `json:"creator_id"`
+	LocalPath    string        `json:"local_path,omitempty"`
+	Files        []MeshwebFile `json:"files,omitempty"` // for folders
 }
 
 type DownloadedFile struct {
-	FileName     string `json:"file_name"`
-	FileID       string `json:"file_id"`
-	FileSize     int64  `json:"file_size"`
-	LocalPath    string `json:"local_path"`
-	DownloadedAt string `json:"downloaded_at"`
+	FileName     string        `json:"file_name"`
+	FileID       string        `json:"file_id"`
+	FileSize     int64         `json:"file_size"`
+	LocalPath    string        `json:"local_path"`
+	DownloadedAt string        `json:"downloaded_at"`
+	Type         string        `json:"type,omitempty"`
+	Files        []MeshwebFile `json:"files,omitempty"`
 }
 
 type ChunkRequest struct {
@@ -61,6 +65,13 @@ type ChunkResponse struct {
 	Shard  int    `json:"shard"`
 	Data   string `json:"data"` // base64
 	Error  string `json:"error,omitempty"`
+}
+
+type StoreRequest struct {
+	Action string `json:"action"` // "fetch" or "store"
+	FileID string `json:"file_id"`
+	Shard  int    `json:"shard"`
+	Data   string `json:"data,omitempty"` // base64, only for store
 }
 
 func getStorageDir() string {
@@ -149,21 +160,58 @@ func decryptData(ciphertext []byte, key []byte) ([]byte, error) {
 func (a *App) setupStorageHandler() {
 	a.node.SetStreamHandler(StorageProtocolID, func(s network.Stream) {
 		defer s.Close()
-		
+
 		scanner := bufio.NewScanner(s)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 10*1024*1024)
 		if !scanner.Scan() {
 			return
 		}
 
-		var req ChunkRequest
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+		// Try to parse as StoreRequest first (has "action" field)
+		var storeReq StoreRequest
+		if err := json.Unmarshal(scanner.Bytes(), &storeReq); err != nil {
 			return
 		}
 
-		shardPath := filepath.Join(getStorageDir(), req.FileID, fmt.Sprintf("shard_%d", req.Shard))
+		if storeReq.Action == "store" {
+			// Incoming shard to store
+			shardData, err := base64.StdEncoding.DecodeString(storeReq.Data)
+			if err != nil {
+				res := ChunkResponse{FileID: storeReq.FileID, Shard: storeReq.Shard, Error: "decode error"}
+				b, _ := json.Marshal(res)
+				b = append(b, '\n')
+				s.Write(b)
+				return
+			}
+
+			fileDir := filepath.Join(getStorageDir(), storeReq.FileID)
+			os.MkdirAll(fileDir, 0755)
+			shardPath := filepath.Join(fileDir, fmt.Sprintf("shard_%d", storeReq.Shard))
+			os.WriteFile(shardPath, shardData, 0644)
+
+			a.logEvent(fmt.Sprintf("[Storage] Stored shard %d for %s from %s", storeReq.Shard, storeReq.FileID[:8], s.Conn().RemotePeer().String()[:8]))
+
+			// Announce as provider for this CID
+			go func() {
+				parsedCid, err := cid.Decode(storeReq.FileID)
+				if err == nil {
+					a.idht.Provide(a.ctx, parsedCid, true)
+				}
+			}()
+
+			res := ChunkResponse{FileID: storeReq.FileID, Shard: storeReq.Shard}
+			b, _ := json.Marshal(res)
+			b = append(b, '\n')
+			s.Write(b)
+			return
+		}
+
+		// Default: fetch shard (backward compatible with old ChunkRequest)
+		shardPath := filepath.Join(getStorageDir(), storeReq.FileID, fmt.Sprintf("shard_%d", storeReq.Shard))
 		data, err := os.ReadFile(shardPath)
-		
-		res := ChunkResponse{FileID: req.FileID, Shard: req.Shard}
+
+		res := ChunkResponse{FileID: storeReq.FileID, Shard: storeReq.Shard}
 		if err != nil {
 			res.Error = "shard not found"
 		} else {
@@ -174,6 +222,70 @@ func (a *App) setupStorageHandler() {
 		b = append(b, '\n')
 		s.Write(b)
 	})
+}
+
+func (a *App) distributeShardsToNetwork(fileID string, shards [][]byte) {
+	const relayPeerID = "12D3KooWRdvwz59ErP1e6pxqxpYY6rNFTYPCDYGK8eoH9cd4obfq"
+
+	peers := a.node.Network().Peers()
+	if len(peers) == 0 {
+		a.logEvent("[Storage] No peers available for shard distribution")
+		return
+	}
+
+	// Filter out relay and self
+	var validPeers []peer.ID
+	for _, p := range peers {
+		if p.String() != a.myPeerID && p.String() != relayPeerID {
+			validPeers = append(validPeers, p)
+		}
+	}
+
+	if len(validPeers) == 0 {
+		a.logEvent("[Storage] No valid peers for distribution")
+		return
+	}
+
+	a.logEvent(fmt.Sprintf("[Storage] Distributing %d shards to %d peers...", len(shards), len(validPeers)))
+
+	distributed := 0
+	for i, shard := range shards {
+		targetPeer := validPeers[i%len(validPeers)]
+
+		go func(shardIdx int, shardData []byte, target peer.ID) {
+			stream, err := a.node.NewStream(a.ctx, target, StorageProtocolID)
+			if err != nil {
+				return
+			}
+			defer stream.Close()
+
+			req := StoreRequest{
+				Action: "store",
+				FileID: fileID,
+				Shard:  shardIdx,
+				Data:   base64.StdEncoding.EncodeToString(shardData),
+			}
+			b, _ := json.Marshal(req)
+			b = append(b, '\n')
+			stream.Write(b)
+
+			// Wait for ack
+			scanner := bufio.NewScanner(stream)
+			buf := make([]byte, 0, 64*1024)
+			scanner.Buffer(buf, 10*1024*1024)
+			if scanner.Scan() {
+				var res ChunkResponse
+				json.Unmarshal(scanner.Bytes(), &res)
+				if res.Error == "" {
+					a.logEvent(fmt.Sprintf("[Storage] Shard %d → %s ✅", shardIdx, target.String()[:8]))
+				}
+			}
+		}(i, shard, targetPeer)
+
+		distributed++
+	}
+
+	a.logEvent(fmt.Sprintf("[Storage] Distribution started: %d shards", distributed))
 }
 
 const (
@@ -191,6 +303,10 @@ func (a *App) UploadFile(filePath string) map[string]interface{} {
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 
+	return a.UploadData(data, filepath.Base(filePath), filePath)
+}
+
+func (a *App) UploadData(data []byte, fileName string, localPath string) map[string]interface{} {
 	// 1. Encrypt
 	ciphertext, aesKey, err := encryptData(data)
 	if err != nil {
@@ -230,7 +346,7 @@ func (a *App) UploadFile(filePath string) map[string]interface{} {
 	keyHash := sha256.Sum256(aesKey)
 	meta := MeshwebFile{
 		Version:      "1.0",
-		FileName:     filepath.Base(filePath),
+		FileName:     fileName,
 		FileSize:     int64(len(data)),
 		OriginalSize: len(ciphertext), // needed to trim RS padding on download
 		FileID:       fileCID,
@@ -241,7 +357,7 @@ func (a *App) UploadFile(filePath string) map[string]interface{} {
 		AESKey:       base64.StdEncoding.EncodeToString(aesKey),
 		CreatedAt:    time.Now().Format("2006-01-02 15:04:05"),
 		CreatorID:    "MW-" + a.GetPublicKey()[len(a.GetPublicKey())-8:],
-		LocalPath:    filePath,
+		LocalPath:    localPath,
 	}
 
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
@@ -258,6 +374,9 @@ func (a *App) UploadFile(filePath string) map[string]interface{} {
 			a.logEvent(fmt.Sprintf("[Storage] File announced ✅: %s", fileCID))
 		}
 	}()
+
+	// 7. Distribute shards to network peers
+	go a.distributeShardsToNetwork(fileCID, shards)
 
 	return map[string]interface{}{
 		"success": true,
@@ -316,9 +435,65 @@ func (a *App) GetMyFiles() []MeshwebFile {
 	return list
 }
 
+func (a *App) removeRecursive(folder MeshwebFile, fileId string) (bool, MeshwebFile) {
+	removedAny := false
+	var newFiles []MeshwebFile
+	var newSize int64
+
+	for _, f := range folder.Files {
+		if f.FileID == fileId {
+			removedAny = true
+			continue
+		}
+		if f.Type == "folder" {
+			removedSub, newSubFolder := a.removeRecursive(f, fileId)
+			if removedSub {
+				removedAny = true
+				f = newSubFolder
+			}
+		}
+		newFiles = append(newFiles, f)
+		newSize += f.FileSize
+	}
+
+	if removedAny {
+		folder.Files = newFiles
+		folder.FileSize = newSize
+	}
+	return removedAny, folder
+}
+
+func (a *App) removeInnerFileFromFolders(fileId string) {
+	files, err := os.ReadDir(getStorageDir())
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".meshweb") {
+			metaPath := filepath.Join(getStorageDir(), f.Name())
+			data, err := os.ReadFile(metaPath)
+			if err == nil {
+				var meta MeshwebFile
+				json.Unmarshal(data, &meta)
+				if meta.Type == "folder" {
+					if removed, newMeta := a.removeRecursive(meta, fileId); removed {
+						b, _ := json.MarshalIndent(newMeta, "", "  ")
+						os.WriteFile(metaPath, b, 0644)
+					}
+				}
+			}
+		}
+	}
+}
+
 func (a *App) DeleteFile(fileId string) {
 	os.RemoveAll(filepath.Join(getStorageDir(), fileId))
-	os.Remove(filepath.Join(getStorageDir(), fileId+".meshweb"))
+	err := os.Remove(filepath.Join(getStorageDir(), fileId+".meshweb"))
+	if err != nil {
+		a.removeInnerFileFromFolders(fileId)
+	} else {
+		a.removeInnerFileFromFolders(fileId)
+	}
 }
 
 func (a *App) DownloadFile(linkOrPath string) map[string]interface{} {
@@ -392,126 +567,45 @@ func (a *App) DownloadFile(linkOrPath string) map[string]interface{} {
 
 	a.logEvent(fmt.Sprintf("[Download] Finding providers for %s...", fileId[:8]))
 
-	parsedCid, err := cid.Decode(fileId)
+	plaintext, err := a.fetchAndDecrypt(fileId, aesKey, meta.OriginalSize)
 	if err != nil {
-		return map[string]interface{}{"success": false, "error": "invalid file ID"}
+		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 
-	// 2. Find Providers
-	providers := a.idht.FindProvidersAsync(a.ctx, parsedCid, 5)
-	
-	var provider peer.AddrInfo
-	select {
-	case p, ok := <-providers:
-		if !ok || p.ID == "" {
-			return map[string]interface{}{"success": false, "error": "No seeders found"}
+	var folderMeta MeshwebFile
+	if err := json.Unmarshal(plaintext, &folderMeta); err == nil && folderMeta.Type == "folder" {
+		folderName := folderMeta.FileName
+		folderName = strings.TrimSuffix(folderName, ".folder.json")
+		if folderName == "" {
+			folderName = fileId[:8]
 		}
-		provider = p
-	case <-time.After(15 * time.Second):
-		return map[string]interface{}{"success": false, "error": "Timeout finding seeders"}
-	}
+		outPath := uniqueFilePath(getDownloadsDir(), folderName)
+		os.MkdirAll(outPath, 0755)
 
-	a.logEvent(fmt.Sprintf("[Download] Found seeder: %s. Fetching chunks...", provider.ID.String()[:8]))
-
-	// 3. Connect to Provider
-	err = a.node.Connect(a.ctx, provider)
-	if err != nil {
-		a.logEvent(fmt.Sprintf("[Download] Seeder ulanish xatosi: %v", err))
-		// Try via relay? Let libp2p handle it
-	}
-
-	// 4. Download shards with Reed-Solomon recovery
-	//    Try to fetch all rsTotalShards shards; mark missing ones as nil.
-	//    RS can reconstruct the original as long as >= rsDataShards are present.
-	enc, err := reedsolomon.New(rsDataShards, rsParityShards)
-	if err != nil {
-		return map[string]interface{}{"success": false, "error": "RS decoder init failed"}
-	}
-
-	totalShards := rsTotalShards
-	if meta.Shards > 0 {
-		totalShards = meta.Shards
-	}
-
-	shards := make([][]byte, totalShards)
-	receivedCount := 0
-
-	for i := 0; i < totalShards; i++ {
-		stream, err := a.node.NewStream(a.ctx, provider.ID, StorageProtocolID)
+		err = a.downloadFolderRecursive(folderMeta, outPath)
 		if err != nil {
-			// Cannot open stream — mark shard as missing
-			shards[i] = nil
-			continue
+			return map[string]interface{}{"success": false, "error": err.Error()}
 		}
 
-		req := ChunkRequest{FileID: fileId, Shard: i}
-		b, _ := json.Marshal(req)
-		b = append(b, '\n')
-		stream.Write(b)
+		a.logEvent(fmt.Sprintf("[Download] Folder Success ✅ Saved to %s", outPath))
 
-		scanner := bufio.NewScanner(stream)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 10*1024*1024)
-
-		if !scanner.Scan() {
-			stream.Close()
-			shards[i] = nil
-			continue
+		df := DownloadedFile{
+			FileName:     folderName,
+			FileID:       fileId,
+			FileSize:     folderMeta.FileSize,
+			LocalPath:    outPath,
+			DownloadedAt: time.Now().Format("2006-01-02 15:04:05"),
+			Type:         "folder",
+			Files:        folderMeta.Files,
 		}
+		a.saveDownloadedFile(df)
 
-		var res ChunkResponse
-		json.Unmarshal(scanner.Bytes(), &res)
-		stream.Close()
-
-		if res.Error != "" || res.Data == "" {
-			shards[i] = nil
-			continue
-		}
-
-		chunkData, decErr := base64.StdEncoding.DecodeString(res.Data)
-		if decErr != nil {
-			shards[i] = nil
-			continue
-		}
-
-		shards[i] = chunkData
-		receivedCount++
-		runtime.EventsEmit(a.ctx, "download-progress", float64(receivedCount)/float64(rsDataShards)*100.0)
-	}
-
-	if receivedCount < rsDataShards {
 		return map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("Not enough shards: got %d, need at least %d", receivedCount, rsDataShards),
+			"success": true,
+			"path":    outPath,
 		}
 	}
 
-	// Reconstruct missing shards using Reed-Solomon
-	if err := enc.Reconstruct(shards); err != nil {
-		return map[string]interface{}{"success": false, "error": fmt.Sprintf("RS reconstruct failed: %v", err)}
-	}
-
-	// Join only data shards (first rsDataShards) to rebuild ciphertext
-	var ciphertext []byte
-	for i := 0; i < rsDataShards; i++ {
-		ciphertext = append(ciphertext, shards[i]...)
-	}
-
-	// Trim RS zero-padding: enc.Split() pads the last data shard so all
-	// shards are equal length. OriginalSize tells us the true ciphertext end.
-	if meta.OriginalSize > 0 && meta.OriginalSize < len(ciphertext) {
-		ciphertext = ciphertext[:meta.OriginalSize]
-	}
-
-	a.logEvent("[Download] Shards reconstructed. Decrypting...")
-
-	// 5. Decrypt
-	plaintext, err := decryptData(ciphertext, aesKey)
-	if err != nil {
-		return map[string]interface{}{"success": false, "error": "Decryption failed (wrong key or corrupted data)"}
-	}
-
-	// 6. Resolve output path — use the original filename, auto-number duplicates.
 	outName := meta.FileName
 	outName = strings.TrimPrefix(outName, "downloaded_")
 	if outName == "" {
@@ -525,7 +619,6 @@ func (a *App) DownloadFile(linkOrPath string) map[string]interface{} {
 
 	a.logEvent(fmt.Sprintf("[Download] Success ✅ Saved to %s", outPath))
 
-	// Save to downloads.json
 	df := DownloadedFile{
 		FileName:     outName,
 		FileID:       fileId,
@@ -539,6 +632,155 @@ func (a *App) DownloadFile(linkOrPath string) map[string]interface{} {
 		"success": true,
 		"path":    outPath,
 	}
+}
+
+func (a *App) fetchAndDecrypt(fileId string, aesKey []byte, originalSize int) ([]byte, error) {
+	parsedCid, err := cid.Decode(fileId)
+	if err != nil {
+		return nil, fmt.Errorf("invalid file ID")
+	}
+
+	providersChan := a.idht.FindProvidersAsync(a.ctx, parsedCid, 20)
+	var providerList []peer.AddrInfo
+	timeout := time.After(15 * time.Second)
+collecting:
+	for {
+		select {
+		case p, ok := <-providersChan:
+			if !ok {
+				break collecting
+			}
+			if p.ID != "" && p.ID != a.node.ID() {
+				providerList = append(providerList, p)
+			}
+		case <-timeout:
+			break collecting
+		}
+	}
+
+	for _, p := range a.node.Network().Peers() {
+		alreadyIn := false
+		for _, existing := range providerList {
+			if existing.ID == p {
+				alreadyIn = true
+				break
+			}
+		}
+		if !alreadyIn && p != a.node.ID() {
+			providerList = append(providerList, peer.AddrInfo{ID: p})
+		}
+	}
+
+	if len(providerList) == 0 {
+		return nil, fmt.Errorf("No seeders found")
+	}
+
+	for _, p := range providerList {
+		a.node.Connect(a.ctx, p)
+	}
+
+	enc, err := reedsolomon.New(rsDataShards, rsParityShards)
+	if err != nil {
+		return nil, fmt.Errorf("RS decoder init failed")
+	}
+
+	totalShards := rsTotalShards
+	shards := make([][]byte, totalShards)
+	receivedCount := 0
+
+	for i := 0; i < totalShards && receivedCount < rsDataShards; i++ {
+		for _, p := range providerList {
+			stream, err := a.node.NewStream(a.ctx, p.ID, StorageProtocolID)
+			if err != nil {
+				continue
+			}
+
+			req := ChunkRequest{FileID: fileId, Shard: i}
+			b, _ := json.Marshal(req)
+			b = append(b, '\n')
+			stream.Write(b)
+
+			scanner := bufio.NewScanner(stream)
+			buf := make([]byte, 0, 64*1024)
+			scanner.Buffer(buf, 10*1024*1024)
+
+			if !scanner.Scan() {
+				stream.Close()
+				continue
+			}
+
+			var res ChunkResponse
+			json.Unmarshal(scanner.Bytes(), &res)
+			stream.Close()
+
+			if res.Error != "" || res.Data == "" {
+				continue
+			}
+
+			chunkData, decErr := base64.StdEncoding.DecodeString(res.Data)
+			if decErr != nil {
+				continue
+			}
+
+			shards[i] = chunkData
+			receivedCount++
+			
+			// Main progress event
+			progress := float64(receivedCount) / float64(rsDataShards) * 100.0
+			if progress > 100 {
+				progress = 100
+			}
+			runtime.EventsEmit(a.ctx, "download-progress", progress)
+			break
+		}
+	}
+
+	if receivedCount < rsDataShards {
+		return nil, fmt.Errorf("Not enough shards: got %d, need at least %d", receivedCount, rsDataShards)
+	}
+
+	if err := enc.Reconstruct(shards); err != nil {
+		return nil, fmt.Errorf("RS reconstruct failed: %v", err)
+	}
+
+	var ciphertext []byte
+	for i := 0; i < rsDataShards; i++ {
+		ciphertext = append(ciphertext, shards[i]...)
+	}
+
+	if originalSize > 0 && originalSize < len(ciphertext) {
+		ciphertext = ciphertext[:originalSize]
+	}
+
+	plaintext, err := decryptData(ciphertext, aesKey)
+	if err != nil {
+		return nil, fmt.Errorf("Decryption failed (wrong key or corrupted data)")
+	}
+
+	return plaintext, nil
+}
+
+func (a *App) downloadFolderRecursive(folder MeshwebFile, currentPath string) error {
+	for _, child := range folder.Files {
+		if child.Type == "folder" {
+			subPath := filepath.Join(currentPath, child.FileName)
+			os.MkdirAll(subPath, 0755)
+			if err := a.downloadFolderRecursive(child, subPath); err != nil {
+				a.logEvent(fmt.Sprintf("[Download] Error in subfolder %s: %v", child.FileName, err))
+			}
+		} else {
+			a.logEvent(fmt.Sprintf("[Download] Fetching file %s...", child.FileName))
+			aesKeyBytes, _ := base64.StdEncoding.DecodeString(child.AESKey)
+			plaintext, err := a.fetchAndDecrypt(child.FileID, aesKeyBytes, child.OriginalSize)
+			if err != nil {
+				a.logEvent(fmt.Sprintf("[Download] Error fetching %s: %v", child.FileName, err))
+				continue
+			}
+			outPath := filepath.Join(currentPath, child.FileName)
+			os.WriteFile(outPath, plaintext, 0644)
+		}
+	}
+	return nil
 }
 
 func (a *App) saveDownloadedFile(df DownloadedFile) {

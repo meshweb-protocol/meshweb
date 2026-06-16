@@ -74,5 +74,8 @@
   "Size": "Размер",
   "Status": "Статус",
   "Actions": "Действия",
-  "Date": "Дата"
+  "Date": "Дата",
+  "Upload Folder": "Загрузить папку",
+  "Folder": "Папка",
+  "Double-click to open": "Дважды нажмите для открытия"
 }

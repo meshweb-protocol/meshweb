@@ -205,6 +205,88 @@ func (a *App) SelectFile() string {
 	return path
 }
 
+func (a *App) SelectFolder() string {
+	result, _ := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Folder to Upload",
+	})
+	return result
+}
+
+func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return MeshwebFile{}, err
+	}
+
+	var files []MeshwebFile
+	var totalSize int64
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(dirPath, entry.Name())
+		if entry.IsDir() {
+			subFolder, err := a.uploadDir(fullPath, false)
+			if err == nil {
+				files = append(files, subFolder)
+				totalSize += subFolder.FileSize
+			}
+		} else {
+			result := a.UploadFile(fullPath)
+			if result["success"].(bool) {
+				meta := result["meta"].(MeshwebFile)
+				files = append(files, meta)
+				totalSize += meta.FileSize
+				os.Remove(filepath.Join(getStorageDir(), meta.FileID+".meshweb"))
+			}
+		}
+	}
+
+	folderMeta := MeshwebFile{
+		Version:   "1.0",
+		Type:      "folder",
+		FileName:  filepath.Base(dirPath),
+		FileSize:  totalSize,
+		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+		CreatorID: "MW-" + a.GetPublicKey()[len(a.GetPublicKey())-8:],
+		LocalPath: dirPath,
+		Files:     files,
+	}
+
+	folderMetaBytes, _ := json.MarshalIndent(folderMeta, "", "  ")
+	res := a.UploadData(folderMetaBytes, filepath.Base(dirPath), dirPath)
+	if res["success"].(bool) {
+		finalMeta := res["meta"].(MeshwebFile)
+		finalMeta.Type = "folder"
+		finalMeta.FileName = filepath.Base(dirPath)
+		finalMeta.Files = files
+
+		if isRoot {
+			finalMetaBytes, _ := json.MarshalIndent(finalMeta, "", "  ")
+			os.WriteFile(filepath.Join(getStorageDir(), finalMeta.FileID+".meshweb"), finalMetaBytes, 0644)
+		} else {
+			os.Remove(filepath.Join(getStorageDir(), finalMeta.FileID+".meshweb"))
+		}
+		return finalMeta, nil
+	}
+
+	return folderMeta, nil
+}
+
+func (a *App) UploadFolder(folderPath string) map[string]interface{} {
+	a.logEvent(fmt.Sprintf("[Storage] Uploading folder: %s", filepath.Base(folderPath)))
+
+	folderMeta, err := a.uploadDir(folderPath, true)
+	if err != nil {
+		return map[string]interface{}{"success": false, "error": err.Error()}
+	}
+
+	a.logEvent(fmt.Sprintf("[Storage] Folder uploaded ✅"))
+
+	return map[string]interface{}{
+		"success": true,
+		"meta":    folderMeta,
+	}
+}
+
 func (a *App) GetDashboardStats() map[string]interface{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()

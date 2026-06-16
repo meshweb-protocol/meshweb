@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { StartNewNetwork, ConnectToNetwork, GetDashboardStats, ToggleOfferResources, LoadIdentity, GenerateIdentity, RestoreIdentity, GetPublicKey, ExportIdentity, SelectFile, UploadFile, DownloadFile, GenerateShareLink, GenerateMeshwebFile, GetMyFiles, DeleteFile, RegisterFileAssociation, GetStartupFile, FindAvailableNodes, StartRental, StopRental, GetRentalStatus, GetDownloadedFiles, OpenFile } from '../wailsjs/go/main/App';
+import { StartNewNetwork, ConnectToNetwork, GetDashboardStats, ToggleOfferResources, LoadIdentity, GenerateIdentity, RestoreIdentity, GetPublicKey, ExportIdentity, SelectFile, SelectFolder, UploadFile, UploadFolder, DownloadFile, GenerateShareLink, GenerateMeshwebFile, GetMyFiles, DeleteFile, RegisterFileAssociation, GetStartupFile, FindAvailableNodes, StartRental, StopRental, GetRentalStatus, GetDownloadedFiles, OpenFile } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import './App.css';
 import en from './locales/en.json';
@@ -24,6 +24,7 @@ function App() {
   const [storageSubTab, setStorageSubTab] = useState<'uploads' | 'downloads'>('uploads');
   const [myFiles, setMyFiles] = useState<any[]>([]);
   const [downloadedFiles, setDownloadedFiles] = useState<any[]>([]);
+  const [currentFolder, setCurrentFolder] = useState<any>(null);
   const [downloadLink, setDownloadLink] = useState('');
   const [downloadProgress, setDownloadProgress] = useState(-1);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
@@ -170,11 +171,28 @@ function App() {
     setLoading(false);
   };
 
+  const findFolderRecursive = (items: any[], id: string): any => {
+    for (const item of items) {
+      if (item.file_id === id) return item;
+      if (item.files) {
+        const found = findFolderRecursive(item.files, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
   const loadMyFiles = async () => {
     const files = await GetMyFiles();
     setMyFiles(files || []);
     const downloaded = await GetDownloadedFiles();
     setDownloadedFiles(downloaded || []);
+    
+    setCurrentFolder((prev: any) => {
+      if (!prev) return null;
+      const updated = findFolderRecursive(files || [], prev.file_id);
+      return updated || null;
+    });
   };
 
   useEffect(() => {
@@ -197,20 +215,23 @@ function App() {
     e.preventDefault();
     setIsDragOver(false);
     
-    // Wails does not support accessing absolute path from HTML5 DataTransfer yet by default, 
-    // but WebView2 on Windows might support e.dataTransfer.files[0].path
-    // If not, we will fallback to SelectFile() manually or alert the user.
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file: any = e.dataTransfer.files[0];
-      const path = file.path || file.name; // file.path works in Electron/WebView2 if enabled
+      const path = file.path || file.name;
       if (path && path.includes('\\')) {
         setLoading(true);
-        const res = await UploadFile(path);
-        if (res.success) loadMyFiles();
-        else alert("Upload failed: " + res.error);
+        // Check if it's a folder (no extension and size 0 often indicates folder)
+        if (file.type === '' && file.size === 0) {
+          const res = await UploadFolder(path);
+          if (res.success) loadMyFiles();
+          else alert("Upload failed: " + res.error);
+        } else {
+          const res = await UploadFile(path);
+          if (res.success) loadMyFiles();
+          else alert("Upload failed: " + res.error);
+        }
         setLoading(false);
       } else {
-        // Fallback if path is not available
         handleUpload();
       }
     }
@@ -221,6 +242,19 @@ function App() {
     if (!path) return;
     setLoading(true);
     const res = await UploadFile(path);
+    if (res.success) {
+      loadMyFiles();
+    } else {
+      alert("Upload failed: " + res.error);
+    }
+    setLoading(false);
+  };
+
+  const handleUploadFolder = async () => {
+    const path = await SelectFolder();
+    if (!path) return;
+    setLoading(true);
+    const res = await UploadFolder(path);
     if (res.success) {
       loadMyFiles();
     } else {
@@ -575,6 +609,14 @@ function App() {
                   <span>+</span>
                   <span>{t('Fayl yuklash') || 'Upload'}</span>
                 </button>
+                <button 
+                  onClick={handleUploadFolder}
+                  disabled={loading}
+                  className="px-4 py-2 text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-xl transition-all flex items-center space-x-2"
+                >
+                  <span>📁</span>
+                  <span>{t('Upload Folder')}</span>
+                </button>
               </div>
             </div>
 
@@ -605,8 +647,17 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
+                    <div className="bg-gray-800/40 rounded-xl rounded-t-none border border-gray-700/50 overflow-y-auto max-h-[400px]">
+                      {currentFolder && (
+                        <div className="p-3 border-b border-gray-700/50 flex items-center space-x-3 bg-gray-800/80">
+                          <button onClick={() => setCurrentFolder(null)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300">
+                            ← Back
+                          </button>
+                          <span className="font-bold text-gray-200">📁 {currentFolder.file_name}</span>
+                        </div>
+                      )}
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
                         <tr>
                           <th className="py-3 px-4 w-12 text-center"></th>
                           <th className="py-3 px-4 font-medium">{t('Name')}</th>
@@ -637,18 +688,17 @@ function App() {
                           </tr>
                         )}
                         
-                        {myFiles.map((f, i) => {
-                          const ext = f.file_name.split('.').pop()?.toLowerCase();
+                        {(currentFolder ? currentFolder.files : myFiles).map((f: any, i: number) => {
                           let icon = '📄';
-                          if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) icon = '📹';
-                          else if (['mp3', 'wav', 'ogg'].includes(ext)) icon = '🎵';
-                          else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) icon = '🖼';
-                          else if (['zip', 'rar', 'tar', 'gz'].includes(ext)) icon = '📦';
-                          
+                          if (f.type === 'folder') icon = '📁';
+                          else if (f.file_name.endsWith('.png') || f.file_name.endsWith('.jpg')) icon = '🖼️';
+                          else if (f.file_name.endsWith('.mp4')) icon = '🎬';
+                          else if (f.file_name.endsWith('.zip')) icon = '📦';
+
                           let sizeStr = '';
                           if (f.file_size < 1024) sizeStr = f.file_size + ' B';
                           else if (f.file_size < 1024*1024) sizeStr = (f.file_size/1024).toFixed(1) + ' KB';
-                          else if (f.file_size < 1024*1024*1024) sizeStr = (f.file_size/1024/1024).toFixed(1) + ' MB';
+                          else if (f.file_size < 1024*1024*1024) sizeStr = (f.file_size/1024/1024).toFixed(2) + ' MB';
                           else sizeStr = (f.file_size/1024/1024/1024).toFixed(2) + ' GB';
 
                           const isComplete = f.file_name.startsWith('downloaded_') || f.creator_id !== stats?.peerId;
@@ -665,7 +715,10 @@ function App() {
                           );
 
                           return (
-                            <tr key={i} className="hover:bg-gray-800/50 transition-colors group">
+                            <tr key={i} className="hover:bg-white/5 transition-colors cursor-pointer" onDoubleClick={() => {
+                              if (f.type === 'folder') setCurrentFolder(f);
+                              else handleShareLink(f.file_id);
+                            }}>
                               <td className="py-3 px-4 text-center text-xl">{icon}</td>
                               <td className="py-3 px-4 font-medium text-gray-200 max-w-[200px] truncate" title={f.file_name}>{f.file_name}</td>
                               <td className="py-3 px-4 text-gray-400">{sizeStr}</td>
@@ -686,7 +739,8 @@ function App() {
                           );
                         })}
                       </tbody>
-                    </table>
+                      </table>
+                    </div>
                   )}
                 </>
               )}
@@ -700,8 +754,9 @@ function App() {
                       <p className="text-lg">{t('No files yet')}</p>
                     </div>
                   ) : (
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
+                    <div className="bg-gray-800/40 rounded-xl rounded-t-none border border-gray-700/50 overflow-y-auto max-h-[400px]">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
                         <tr>
                           <th className="py-3 px-4 w-12 text-center"></th>
                           <th className="py-3 px-4 font-medium">{t('Name')}</th>
@@ -714,7 +769,8 @@ function App() {
                         {downloadedFiles.map((df, i) => {
                           const ext = df.file_name.split('.').pop()?.toLowerCase();
                           let icon = '📄';
-                          if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) icon = '📹';
+                          if (df.type === 'folder') icon = '📁';
+                          else if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) icon = '📹';
                           else if (['mp3', 'wav', 'ogg'].includes(ext)) icon = '🎵';
                           else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) icon = '🖼';
                           else if (['zip', 'rar', 'tar', 'gz'].includes(ext)) icon = '📦';
@@ -726,24 +782,19 @@ function App() {
                           else sizeStr = (df.file_size/1024/1024/1024).toFixed(2) + ' GB';
 
                           return (
-                            <tr key={i} className="hover:bg-gray-800/50 transition-colors group">
+                            <tr key={i} className="hover:bg-white/5 transition-colors cursor-pointer" onDoubleClick={() => OpenFile(df.local_path)}>
                               <td className="py-3 px-4 text-center text-xl">{icon}</td>
                               <td className="py-3 px-4 font-medium text-gray-200 max-w-[200px] truncate" title={df.file_name}>{df.file_name}</td>
                               <td className="py-3 px-4 text-gray-400">{sizeStr}</td>
                               <td className="py-3 px-4 text-gray-500 text-xs">{df.downloaded_at}</td>
-                              <td className="py-3 px-4 text-right opacity-50 group-hover:opacity-100 transition-opacity">
-                                <div className="flex justify-end space-x-1">
-                                  <button onClick={() => OpenFile(df.local_path)} className="px-3 py-1.5 text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-md transition-colors flex items-center space-x-1" title={t('Ochish') || 'Open'}>
-                                    <span>📂</span>
-                                    <span>{t('Open')}</span>
-                                  </button>
-                                </div>
+                              <td className="py-3 px-4 text-right">
                               </td>
                             </tr>
                           );
                         })}
                       </tbody>
-                    </table>
+                      </table>
+                    </div>
                   )}
                 </>
               )}
