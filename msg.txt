@@ -1,9 +1,0 @@
-﻿Genesis: Meshweb v0.1.0
-
-Decentralized P2P file storage protocol.
-- LibP2P + Kademlia DHT
-- AES-256-GCM encryption
-- Reed-Solomon erasure coding (10+20)
-- Circuit Relay v2 NAT traversal
-- BIP39 + Ed25519 self-sovereign identity
-- Multi-language GUI (EN/UZ/RU)
