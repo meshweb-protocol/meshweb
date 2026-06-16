@@ -212,7 +212,7 @@ func (a *App) SelectFolder() string {
 	return result
 }
 
-func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
+func (a *App) uploadDir(dirPath string, rootPath string, isRoot bool) (MeshwebFile, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return MeshwebFile{}, err
@@ -224,8 +224,10 @@ func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
 	for _, entry := range entries {
 		fullPath := filepath.Join(dirPath, entry.Name())
 		if entry.IsDir() {
-			subFolder, err := a.uploadDir(fullPath, false)
+			subFolder, err := a.uploadDir(fullPath, rootPath, false)
 			if err == nil {
+				relPath, _ := filepath.Rel(rootPath, fullPath)
+				subFolder.RelativePath = strings.ReplaceAll(relPath, "\\", "/")
 				files = append(files, subFolder)
 				totalSize += subFolder.FileSize
 			}
@@ -233,6 +235,8 @@ func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
 			result := a.UploadFile(fullPath)
 			if result["success"].(bool) {
 				meta := result["meta"].(MeshwebFile)
+				relPath, _ := filepath.Rel(rootPath, fullPath)
+				meta.RelativePath = strings.ReplaceAll(relPath, "\\", "/")
 				files = append(files, meta)
 				totalSize += meta.FileSize
 				os.Remove(filepath.Join(getStorageDir(), meta.FileID+".meshweb"))
@@ -257,6 +261,7 @@ func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
 		finalMeta := res["meta"].(MeshwebFile)
 		finalMeta.Type = "folder"
 		finalMeta.FileName = filepath.Base(dirPath)
+		finalMeta.FileSize = totalSize
 		finalMeta.Files = files
 
 		if isRoot {
@@ -274,7 +279,7 @@ func (a *App) uploadDir(dirPath string, isRoot bool) (MeshwebFile, error) {
 func (a *App) UploadFolder(folderPath string) map[string]interface{} {
 	a.logEvent(fmt.Sprintf("[Storage] Uploading folder: %s", filepath.Base(folderPath)))
 
-	folderMeta, err := a.uploadDir(folderPath, true)
+	folderMeta, err := a.uploadDir(folderPath, folderPath, true)
 	if err != nil {
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}

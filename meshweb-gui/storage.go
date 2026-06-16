@@ -31,6 +31,7 @@ type MeshwebFile struct {
 	Version      string        `json:"version"`
 	Type         string        `json:"type,omitempty"` // "folder" or empty for file
 	FileName     string        `json:"file_name"`
+	RelativePath string        `json:"relative_path,omitempty"` // Added for proper nested folder reconstruction
 	FileSize     int64         `json:"file_size"`
 	OriginalSize int           `json:"original_size"` // len(ciphertext) before RS padding
 	FileID       string        `json:"file_id"`
@@ -760,24 +761,46 @@ collecting:
 	return plaintext, nil
 }
 
-func (a *App) downloadFolderRecursive(folder MeshwebFile, currentPath string) error {
+func (a *App) downloadFolderRecursive(folder MeshwebFile, basePath string) error {
 	for _, child := range folder.Files {
 		if child.Type == "folder" {
-			subPath := filepath.Join(currentPath, child.FileName)
+			var subPath string
+			if child.RelativePath != "" {
+				relPath := filepath.FromSlash(child.RelativePath)
+				subPath = filepath.Join(basePath, relPath)
+			} else {
+				subPath = filepath.Join(basePath, child.FileName)
+			}
 			os.MkdirAll(subPath, 0755)
-			if err := a.downloadFolderRecursive(child, subPath); err != nil {
+			if err := a.downloadFolderRecursive(child, basePath); err != nil {
 				a.logEvent(fmt.Sprintf("[Download] Error in subfolder %s: %v", child.FileName, err))
 			}
 		} else {
 			a.logEvent(fmt.Sprintf("[Download] Fetching file %s...", child.FileName))
+			
+			var outPath string
+			if child.RelativePath != "" {
+				relPath := filepath.FromSlash(child.RelativePath)
+				outPath = filepath.Join(basePath, relPath)
+				os.MkdirAll(filepath.Dir(outPath), 0755)
+			} else {
+				outPath = filepath.Join(basePath, child.FileName)
+			}
+
 			aesKeyBytes, _ := base64.StdEncoding.DecodeString(child.AESKey)
 			plaintext, err := a.fetchAndDecrypt(child.FileID, aesKeyBytes, child.OriginalSize)
 			if err != nil {
 				a.logEvent(fmt.Sprintf("[Download] Error fetching %s: %v", child.FileName, err))
 				continue
 			}
-			outPath := filepath.Join(currentPath, child.FileName)
+			
 			os.WriteFile(outPath, plaintext, 0644)
+			
+			if child.RelativePath != "" {
+				a.logEvent(fmt.Sprintf("[Download] ✅ %s", child.RelativePath))
+			} else {
+				a.logEvent(fmt.Sprintf("[Download] ✅ %s", child.FileName))
+			}
 		}
 	}
 	return nil

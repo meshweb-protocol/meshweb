@@ -19,8 +19,7 @@ function App() {
   const [inputLink, setInputLink] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'files' | 'settings'>('dashboard');
   const [storageSubTab, setStorageSubTab] = useState<'uploads' | 'downloads'>('uploads');
   const [myFiles, setMyFiles] = useState<any[]>([]);
   const [downloadedFiles, setDownloadedFiles] = useState<any[]>([]);
@@ -44,6 +43,13 @@ function App() {
   const [inputSeed, setInputSeed] = useState('');
   const [savedSeed, setSavedSeed] = useState(false);
   const [myPublicKey, setMyPublicKey] = useState('');
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 2500);
+  };
 
   const [stats, setStats] = useState({
     peerId: '',
@@ -83,7 +89,7 @@ function App() {
     GetStartupFile().then((fileOrLink: string) => {
       if (fileOrLink) {
         setDownloadLink(fileOrLink);
-        setActiveTab('storage');
+        setActiveTab('files');
       }
     });
 
@@ -196,7 +202,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'storage') {
+    if (activeTab === 'files') {
       loadMyFiles();
     }
   }, [activeTab]);
@@ -224,11 +230,11 @@ function App() {
         if (file.type === '' && file.size === 0) {
           const res = await UploadFolder(path);
           if (res.success) loadMyFiles();
-          else alert("Upload failed: " + res.error);
+          else showToast("Upload failed: " + res.error, "error");
         } else {
           const res = await UploadFile(path);
           if (res.success) loadMyFiles();
-          else alert("Upload failed: " + res.error);
+          else showToast("Upload failed: " + res.error, "error");
         }
         setLoading(false);
       } else {
@@ -245,7 +251,7 @@ function App() {
     if (res.success) {
       loadMyFiles();
     } else {
-      alert("Upload failed: " + res.error);
+      showToast("Upload failed: " + res.error, "error");
     }
     setLoading(false);
   };
@@ -258,7 +264,7 @@ function App() {
     if (res.success) {
       loadMyFiles();
     } else {
-      alert("Upload failed: " + res.error);
+      showToast("Upload failed: " + res.error, "error");
     }
     setLoading(false);
   };
@@ -269,10 +275,10 @@ function App() {
     setDownloadProgress(0);
     const res = await DownloadFile(downloadLink);
     if (res.success) {
-      alert(t('Download') + " ✅ " + res.path);
+      showToast(t('Download') + " ✅ " + res.path);
       loadMyFiles();
     } else {
-      alert("Error: " + res.error);
+      showToast("Error: " + res.error, "error");
     }
     setDownloadProgress(-1);
     setLoading(false);
@@ -283,7 +289,9 @@ function App() {
     const link = await GenerateShareLink(fileId);
     if (link) {
       navigator.clipboard.writeText(link);
-      alert(t('Link copied!'));
+      showToast(t('Link copied!'));
+    } else {
+      showToast('Error generating link', 'error');
     }
   };
 
@@ -305,8 +313,10 @@ function App() {
   };
 
   const handleRegisterAssoc = async () => {
-    await RegisterFileAssociation();
-    alert("Windows File Association Registered ✅");
+    const res = await RegisterFileAssociation();
+    if (res.success) {
+      showToast("Windows File Association Registered ✅");
+    }
   };
 
   useEffect(() => {
@@ -323,15 +333,15 @@ function App() {
       setTimeout(async () => {
         const startRes = await StartRental(best.peer_id, 4, 8, false, rentDuration);
         if (startRes.success) {
-          setActiveRentalJobId(startRes.jobId);
+          setActiveRentalJobId(startRes.job_id);
           setRentStep('active');
         } else {
-          alert("Failed to rent: " + startRes.error);
+          showToast("Failed to rent: " + startRes.error, "error");
           setRentStep('form');
         }
       }, 1500);
     } else {
-      alert("No suitable nodes available.");
+      showToast("No suitable nodes available.", "error");
       setRentStep('form');
     }
   };
@@ -368,19 +378,15 @@ function App() {
 
   if (identityLoaded === false) {
     return (
-      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-gray-100 font-sans p-6">
-        <div className="w-full max-w-md flex flex-col items-center space-y-8 animate-fade-in-up">
-          <div className="flex flex-col items-center space-y-4">
-            <div className="w-24 h-24 bg-primary rounded-3xl flex items-center justify-center shadow-lg shadow-primary/30 rotate-12 hover:rotate-0 transition-transform duration-500">
-              <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h1 className="text-4xl font-extrabold tracking-tight">Mesh<span className="text-primary">web</span></h1>
-            <p className="text-gray-400 text-center">{t('Welcome to Meshweb')}</p>
+      <div className="h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center text-[var(--text-primary)] font-sans px-5">
+        <div className="w-full max-w-[360px] flex flex-col items-center space-y-8 animate-fade-in">
+          <div className="flex flex-col items-center space-y-3">
+            <img src="/logo.png" width="64" height="64" style={{borderRadius: '8px'}}/>
+            <h1 className="text-[24px] font-bold">Meshweb</h1>
+            <p className="text-[13px] text-[var(--text-secondary)]">{t('Welcome to Meshweb')}</p>
           </div>
 
-          <div className="w-full bg-gray-800 p-8 rounded-2xl shadow-2xl space-y-6 border border-gray-700">
+          <div className="w-full flex flex-col space-y-4">
             {error && <div className="text-danger text-sm text-center bg-danger/10 p-2 rounded">{error}</div>}
             
             {onboardingView === 'main' && (
@@ -388,18 +394,18 @@ function App() {
                 <button
                   onClick={handleCreateIdentity}
                   disabled={loading}
-                  className="w-full py-3 px-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-all shadow-lg"
+                  className="w-full py-2 bg-[var(--accent)] text-white rounded-[6px] text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50 border-none mb-3"
                 >
                   {t('Create New Account')}
                 </button>
-                <div className="relative flex items-center py-2">
-                  <div className="flex-grow border-t border-gray-700"></div>
-                  <span className="flex-shrink-0 mx-4 text-gray-500 text-sm">{t('YOKI')}</span>
-                  <div className="flex-grow border-t border-gray-700"></div>
+                <div className="relative flex items-center py-2 mb-3">
+                  <div className="flex-grow border-t border-[var(--border)]"></div>
+                  <span className="flex-shrink-0 mx-4 text-[var(--text-secondary)] text-[11px]">{t('YOKI')}</span>
+                  <div className="flex-grow border-t border-[var(--border)]"></div>
                 </div>
                 <button
                   onClick={() => setOnboardingView('restore')}
-                  className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-all"
+                  className="w-full py-2 bg-transparent border border-[var(--border)] text-[var(--text-secondary)] hover:text-white hover:border-[var(--text-muted)] rounded-[6px] text-[13px] transition-colors"
                 >
                   {t('Restore Account')}
                 </button>
@@ -408,18 +414,18 @@ function App() {
 
             {onboardingView === 'create' && (
               <div className="space-y-6">
-                <h3 className="text-white font-bold">{t('Your Seed Phrase')}</h3>
-                <div className="bg-gray-900 p-4 rounded-xl font-mono text-sm text-primary select-all break-words border border-primary/20">
+                <h3 className="text-[13px] font-semibold text-white">{t('Your Seed Phrase')}</h3>
+                <div className="bg-[var(--bg-secondary)] border border-[var(--border)] p-3 rounded-[6px] font-mono text-[12px] text-[var(--accent)] select-all break-words">
                   {seedPhrase}
                 </div>
-                <label className="flex items-center space-x-3 cursor-pointer">
-                  <input type="checkbox" checked={savedSeed} onChange={(e) => setSavedSeed(e.target.checked)} className="rounded text-primary focus:ring-primary bg-gray-900 border-gray-700" />
-                  <span className="text-sm text-gray-300">{t('I have saved my seed phrase')}</span>
+                <label className="flex items-center space-x-2 cursor-pointer mt-2 mb-2">
+                  <input type="checkbox" checked={savedSeed} onChange={(e) => setSavedSeed(e.target.checked)} className="rounded text-[var(--accent)] focus:ring-[var(--accent)] bg-[var(--bg-secondary)] border-[var(--border)]" />
+                  <span className="text-[12px] text-[var(--text-secondary)]">{t('I have saved my seed phrase')}</span>
                 </label>
                 <button
                   onClick={handleFinishCreate}
                   disabled={!savedSeed}
-                  className="w-full py-3 px-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-all disabled:opacity-50"
+                  className="w-full py-2 bg-[var(--accent)] text-white rounded-[6px] text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50 border-none"
                 >
                   Davom etish
                 </button>
@@ -428,21 +434,21 @@ function App() {
 
             {onboardingView === 'restore' && (
               <div className="space-y-4">
-                <h3 className="text-white font-bold">{t('Restore Account')}</h3>
+                <h3 className="text-[13px] font-semibold text-white">{t('Restore Account')}</h3>
                 <textarea
                   value={inputSeed}
                   onChange={(e) => setInputSeed(e.target.value)}
                   placeholder="word1 word2 word3..."
-                  className="w-full h-24 bg-gray-900 border border-gray-700 text-white p-3 rounded-xl outline-none focus:border-primary"
+                  className="w-full h-24 bg-[var(--bg-secondary)] border border-[var(--border)] text-white p-3 rounded-[6px] text-[12px] outline-none focus:border-[var(--accent)] custom-scrollbar resize-none"
                 />
                 <button
                   onClick={handleRestoreIdentity}
                   disabled={loading || !inputSeed}
-                  className="w-full py-3 px-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-all disabled:opacity-50"
+                  className="w-full py-2 bg-[var(--accent)] text-white rounded-[6px] text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50 border-none"
                 >
                   Davom etish
                 </button>
-                <button onClick={() => setOnboardingView('main')} className="w-full text-sm text-gray-400 hover:text-white">Orqaga</button>
+                <button onClick={() => setOnboardingView('main')} className="w-full text-[12px] text-[var(--text-secondary)] hover:text-white transition-colors mt-2">Orqaga</button>
               </div>
             )}
           </div>
@@ -453,31 +459,26 @@ function App() {
 
   if (!connected) {
     return (
-      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-gray-100 font-sans p-6">
-        <div className="w-full max-w-md flex flex-col items-center space-y-8 animate-fade-in-up">
+      <div className="h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center text-[var(--text-primary)] font-sans px-5">
+        <div className="w-full max-w-[360px] flex flex-col items-center space-y-8 animate-fade-in">
           {/* Logo Section */}
-          <div className="flex flex-col items-center space-y-4">
-            <div className="w-24 h-24 bg-primary rounded-3xl flex items-center justify-center shadow-lg shadow-primary/30 rotate-12 hover:rotate-0 transition-transform duration-500">
-              <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <h1 className="text-4xl font-extrabold tracking-tight">Mesh<span className="text-primary">web</span></h1>
-            <p className="text-gray-400 text-center">Decentralized Compute Network</p>
+          <div className="flex flex-col items-center space-y-3">
+            <img src="/logo.png" width="64" height="64" style={{borderRadius: '8px'}}/>
+            <h1 className="text-[24px] font-bold">Meshweb</h1>
+            <p className="text-[13px] text-[var(--text-secondary)] text-center">Decentralized Compute Network</p>
           </div>
 
-          {/* Action Cards */}
-          <div className="w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 flex flex-col items-center">
-            {error && <div className="text-danger text-sm text-center bg-danger/10 p-2 rounded w-full mb-4">{error}</div>}
+          <div className="w-full flex flex-col items-center space-y-4">
+            {error && <div className="text-[var(--danger)] text-[12px] text-center w-full">{error}</div>}
             
             <button
               onClick={handleStartNetwork}
               disabled={loading}
-              className="w-full py-4 px-4 bg-primary hover:bg-primary/90 text-white rounded-2xl font-bold text-lg transition-all transform hover:scale-[1.02] active:scale-95 shadow-lg shadow-primary/20 disabled:opacity-50"
+              className="w-full py-2 bg-[var(--accent)] text-white rounded-[6px] text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50 border-none"
             >
               {loading ? t('Kutish...') : t('Join Meshweb')}
             </button>
-            <p className="text-gray-500 text-xs mt-4 text-center">
+            <p className="text-[var(--text-secondary)] text-[11px] text-center mt-2">
               Decentralized resources powered by community.
             </p>
           </div>
@@ -487,142 +488,115 @@ function App() {
   }
 
   return (
-    <div className="h-screen bg-gray-900 text-gray-100 font-sans p-6 flex flex-col space-y-6 overflow-hidden">
+    <div className="h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans flex flex-col overflow-hidden">
       {/* Top Bar */}
-      <header className="flex justify-between items-center bg-gray-800 p-4 rounded-2xl shadow-lg border border-gray-700">
-        <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => setActiveTab('dashboard')}>
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold group-hover:text-primary transition-colors">Meshweb</h2>
+      <header className="flex justify-between items-center bg-[var(--bg-primary)] border-b border-[var(--border)] h-[52px] px-5">
+        <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
+          <img src="/logo.png" width="24" height="24" style={{borderRadius: '4px'}}/>
+          <h2 className="text-[15px] font-semibold text-white">Meshweb</h2>
         </div>
         <div className="flex items-center space-x-6">
           <div className="flex items-center space-x-2">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-success"></span>
-            </span>
-            <span className="text-sm font-medium text-success">{t('Connected')}</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)]"></span>
+            <span className="text-[12px] text-[var(--text-secondary)]">{t('Connected')}</span>
           </div>
-          <div className="flex items-center space-x-3 bg-gray-900 px-3 py-2 rounded-xl border border-gray-700 group cursor-pointer" title={myPublicKey}>
-            <div 
-              className="w-8 h-8 rounded-full shadow-inner flex items-center justify-center text-xs font-bold text-white uppercase"
-              style={{ backgroundColor: `#${myPublicKey.substring(myPublicKey.length - 6)}` }}
-            >
-              {myPublicKey.substring(0, 2)}
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs text-gray-500 uppercase tracking-wider">{t('Identity')}</span>
-              <span className="text-sm font-mono text-gray-200">MW-{myPublicKey.substring(myPublicKey.length - 8)}</span>
-            </div>
+          <div className="flex items-center px-2 py-1 bg-[var(--bg-tertiary)] rounded-[6px] border border-[var(--border)]" title={myPublicKey}>
+            <span className="text-[12px] font-mono text-white">MW-{myPublicKey.substring(myPublicKey.length - 4)}</span>
           </div>
         </div>
       </header>
 
       {activeTab === 'dashboard' && (
-        <div className="flex-grow flex flex-col justify-center items-center space-y-8 min-h-0 animate-fade-in-up">
+        <div className="flex-grow flex flex-col px-5 py-6 overflow-y-auto custom-scrollbar animate-fade-in">
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl mx-auto mt-8">
             {/* Balance Card */}
-            <div className="bg-gray-800 p-10 rounded-[2rem] shadow-2xl border border-gray-700 flex flex-col items-center justify-center transform transition-transform hover:scale-[1.02]">
-              <span className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-4">{t('MENING HISOBIM')}</span>
-              <div className="flex items-baseline space-x-2 mb-6">
-                <span className="text-6xl font-extrabold text-white">{stats.balance.toFixed(2)}</span>
-                <span className="text-xl text-primary font-bold">MWC</span>
-              </div>
-              <div className="bg-gray-900/50 px-6 py-3 rounded-full border border-gray-700">
-                <span className="text-gray-400 mr-2">{t('Bugun')}:</span>
-                <span className="text-success font-bold">+{stats.todayIncome.toFixed(2)} MWC</span>
-              </div>
-
-              <button 
-                onClick={() => setShowComputeModal(true)} 
-                className="mt-8 flex items-center space-x-1 text-sm text-gray-500 hover:text-gray-300 transition-colors opacity-70 hover:opacity-100"
-              >
-                <span>⚡</span>
-                <span>Compute <span className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded-full ml-1">Coming Soon</span></span>
-              </button>
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-5 flex flex-col">
+              <span className="text-[10px] text-[var(--text-secondary)] tracking-[1px] mb-2 uppercase">{t('BALANCE')}</span>
+              <span className="text-[28px] font-bold text-white mb-1">{stats.balance.toFixed(2)} MWC</span>
+              <span className="text-[12px] text-[var(--text-secondary)]">{t('Today')} +{stats.todayIncome.toFixed(2)} MWC</span>
             </div>
 
             {/* Network Card */}
-            <div className="bg-gray-800 p-10 rounded-[2rem] shadow-2xl border border-gray-700 flex flex-col items-center justify-center transform transition-transform hover:scale-[1.02]">
-              <span className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-4">{t('TARMOQ')}</span>
-              <div className="flex items-baseline space-x-2 mb-6">
-                <span className="text-6xl font-extrabold text-white">{stats.connectedPeers}</span>
-                <span className="text-xl text-gray-400 font-medium">{t('node ulangan')}</span>
-              </div>
-              <div className="bg-gray-900/50 px-6 py-3 rounded-full border border-gray-700">
-                <span className="text-gray-400 mr-2">{t('Tezlik')}:</span>
-                <span className="text-white font-bold">~45ms</span>
-              </div>
+            <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-5 flex flex-col">
+              <span className="text-[10px] text-[var(--text-secondary)] tracking-[1px] mb-2 uppercase">{t('NETWORK')}</span>
+              <span className="text-[28px] font-bold text-white mb-1">{stats.connectedPeers} nodes</span>
+              <span className="text-[12px] text-[var(--text-secondary)]">~45ms</span>
+            </div>
+            
+            {/* Offer Resources Toggle */}
+            <div className="md:col-span-2 flex items-center justify-between py-4 border-t border-[var(--border)] mt-4">
+              <span className="text-[13px] text-white">{t('Offer Resources')}</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={offerResources} onChange={(e) => handleToggleOffer(e.target.checked)} />
+                <div className={`w-9 h-5 rounded-full peer peer-checked:bg-[var(--success)] bg-[var(--border)] transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#555555] after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full peer-checked:after:bg-white`}></div>
+              </label>
+            </div>
+            
+            {/* Compute Market Link */}
+            <div className="md:col-span-2 flex items-center justify-between py-4 border-t border-[var(--border)] cursor-pointer group" onClick={() => setShowComputeModal(true)}>
+              <span className="text-[13px] text-white group-hover:text-[var(--accent)] transition-colors">{t('Compute Market')}</span>
+              <span className="text-[11px] text-[var(--accent)] bg-[var(--accent)]/10 px-2 py-0.5 rounded-[4px] uppercase tracking-wide">Coming Soon</span>
             </div>
           </div>
-
         </div>
       )}
 
-      {activeTab === 'storage' && (
+      {activeTab === 'files' && (
         <div 
-          className="flex-grow flex flex-col p-6 animate-fade-in-up"
+          className="flex-grow flex flex-col px-5 py-6 animate-fade-in"
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <div className={`w-full bg-[#1e2329] rounded-[1rem] shadow-2xl border flex flex-col h-full overflow-hidden transition-colors ${isDragOver ? 'border-success bg-[#1e2329]/90' : 'border-gray-700'}`}>
+          <div className={`w-full bg-[var(--bg-primary)] flex flex-col h-full overflow-hidden transition-colors ${isDragOver ? 'border border-[var(--success)] bg-[var(--bg-secondary)]' : ''}`}>
             
             {/* Top Bar with Tabs */}
-            <div className="flex justify-between items-center p-4 border-b border-gray-700 bg-[#161a1e]">
+            <div className="flex justify-between items-center p-3 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
               <div className="flex space-x-6 items-center">
-                <h2 className="text-xl font-bold text-white flex items-center space-x-2 mr-4">
-                  <span className="text-2xl">📂</span>
-                </h2>
+                <h2 className="text-[15px] font-semibold text-white px-2">My Files</h2>
                 
                 <button 
                   onClick={() => setStorageSubTab('uploads')}
-                  className={`text-sm font-bold pb-1 transition-colors ${storageSubTab === 'uploads' ? 'text-primary border-b-2 border-primary' : 'text-gray-500 hover:text-gray-300'}`}
+                  className={`text-[13px] font-medium transition-colors pb-1 ${storageSubTab === 'uploads' ? 'text-white border-b-2 border-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-white'}`}
                 >
-                  📤 {t('My Uploads')}
+                  {t('My Uploads')}
                 </button>
                 <button 
                   onClick={() => setStorageSubTab('downloads')}
-                  className={`text-sm font-bold pb-1 transition-colors ${storageSubTab === 'downloads' ? 'text-primary border-b-2 border-primary' : 'text-gray-500 hover:text-gray-300'}`}
+                  className={`text-[13px] font-medium transition-colors pb-1 ${storageSubTab === 'downloads' ? 'text-white border-b-2 border-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-white'}`}
                 >
-                  📥 {t('Downloaded')}
+                  {t('Downloaded')}
                 </button>
               </div>
 
-              <div className="flex space-x-3">
+              <div className="flex space-x-2">
                 <button 
                   onClick={() => setShowDownloadModal(true)}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium text-sm transition-all flex items-center space-x-2"
+                  className="px-3 py-1.5 bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] text-white border border-[var(--border)] rounded-[6px] text-[12px] transition-colors"
                 >
-                  <span>⬇</span>
-                  <span>{t('Link orqali yuklab olish') || 'Download via Link'}</span>
-                </button>
-                <button 
-                  onClick={handleUpload}
-                  disabled={loading}
-                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg font-bold text-sm transition-all shadow-lg shadow-primary/20 flex items-center space-x-2 disabled:opacity-50"
-                >
-                  <span>+</span>
-                  <span>{t('Fayl yuklash') || 'Upload'}</span>
+                  {t('Link orqali yuklab olish') || 'Download via Link'}
                 </button>
                 <button 
                   onClick={handleUploadFolder}
                   disabled={loading}
-                  className="px-4 py-2 text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-xl transition-all flex items-center space-x-2"
+                  className="px-3 py-1.5 bg-[var(--bg-tertiary)] hover:bg-[var(--bg-hover)] text-white border border-[var(--border)] rounded-[6px] text-[12px] transition-colors disabled:opacity-50"
                 >
-                  <span>📁</span>
-                  <span>{t('Upload Folder')}</span>
+                  {t('Upload Folder')}
+                </button>
+                <button 
+                  onClick={handleUpload}
+                  disabled={loading}
+                  className="px-3 py-1.5 bg-[var(--accent)] hover:opacity-90 text-white rounded-[6px] text-[12px] transition-opacity disabled:opacity-50 border-none"
+                >
+                  + {t('Fayl yuklash') || 'Upload'}
                 </button>
               </div>
             </div>
 
             {/* Drag Overlay Bar if files exist */}
             {isDragOver && (myFiles.length > 0 || storageSubTab === 'downloads') && (
-              <div className="bg-success/20 border-b border-success text-success text-center py-2 text-sm font-bold">
+              <div className="bg-[var(--success)] text-black text-center py-2 text-[12px] font-medium">
                 {t('Yangi fayl yuklash uchun tashlang') || 'Drop files here to upload'}
               </div>
             )}
@@ -634,35 +608,31 @@ function App() {
               {storageSubTab === 'uploads' && (
                 <>
                   {myFiles.length === 0 && downloadProgress < 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full space-y-4 text-gray-500 border-2 border-dashed border-gray-700 m-6 rounded-2xl p-12 transition-colors hover:border-gray-500">
-                      <span className="text-6xl mb-2 opacity-50">📂</span>
-                      <p className="text-lg font-medium text-white">{t('Drop files here')}</p>
-                      <p className="text-sm opacity-70">{t('or')}</p>
+                    <div className="flex flex-col items-center justify-center h-full space-y-4 text-[var(--text-secondary)] border border-dashed border-[var(--border)] m-6 rounded-lg p-12 bg-[var(--bg-secondary)]">
+                      <p className="text-[15px] font-medium text-white">{t('Drop files here')}</p>
+                      <p className="text-[12px] text-[var(--text-secondary)]">{t('or')}</p>
                       <button 
                         onClick={handleUpload}
                         disabled={loading}
-                        className="mt-4 py-3 px-8 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/20 transition-transform transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                        className="mt-4 py-2 px-6 bg-[var(--accent)] hover:opacity-90 text-white rounded-[6px] font-medium transition-opacity disabled:opacity-50 border-none"
                       >
                         + {t('Fayl yuklash') || 'Upload File'}
                       </button>
                     </div>
                   ) : (
-                    <div className="bg-gray-800/40 rounded-xl rounded-t-none border border-gray-700/50 overflow-y-auto max-h-[400px]">
+                    <div className="bg-[var(--bg-primary)]">
                       {currentFolder && (
-                        <div className="p-3 border-b border-gray-700/50 flex items-center space-x-3 bg-gray-800/80">
-                          <button onClick={() => setCurrentFolder(null)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300">
-                            ← Back
-                          </button>
-                          <span className="font-bold text-gray-200">📁 {currentFolder.file_name}</span>
+                        <div className="p-3 border-b border-[var(--border)] flex items-center space-x-3 bg-[var(--bg-secondary)]">
+                          <span className="font-semibold text-[13px] text-white ml-2">📁 {currentFolder.file_name}</span>
                         </div>
                       )}
                       <table className="w-full text-left border-collapse">
-                        <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
+                        <thead className="bg-[var(--bg-secondary)] sticky top-0 z-10 border-b border-[var(--border)] text-[11px] uppercase text-[var(--text-secondary)] tracking-wider">
                         <tr>
-                          <th className="py-3 px-4 w-12 text-center"></th>
-                          <th className="py-3 px-4 font-medium">{t('Name')}</th>
-                          <th className="py-3 px-4 font-medium w-24">{t('Size')}</th>
-                          <th className="py-3 px-4 font-medium w-32">{t('Status')}</th>
+                          <th className="py-2 px-4 w-10 text-center"></th>
+                          <th className="py-2 px-4 font-semibold">{t('Name')}</th>
+                          <th className="py-2 px-4 font-semibold w-24">{t('Size')}</th>
+                          <th className="py-2 px-4 font-semibold w-32">{t('Status')}</th>
                           <th className="py-3 px-4 font-medium w-40 text-right">{t('Actions')}</th>
                         </tr>
                       </thead>
@@ -715,24 +685,21 @@ function App() {
                           );
 
                           return (
-                            <tr key={i} className="hover:bg-white/5 transition-colors cursor-pointer" onDoubleClick={() => {
+                            <tr key={i} className="border-b border-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer" onDoubleClick={() => {
                               if (f.type === 'folder') setCurrentFolder(f);
                               else handleShareLink(f.file_id);
                             }}>
                               <td className="py-3 px-4 text-center text-xl">{icon}</td>
-                              <td className="py-3 px-4 font-medium text-gray-200 max-w-[200px] truncate" title={f.file_name}>{f.file_name}</td>
-                              <td className="py-3 px-4 text-gray-400">{sizeStr}</td>
+                              <td className="py-3 px-4 font-medium text-white max-w-[200px] truncate" title={f.file_name}>{f.file_name}</td>
+                              <td className="py-3 px-4 text-[var(--text-secondary)]">{sizeStr}</td>
                               <td className="py-3 px-4">{stateBadge}</td>
-                              <td className="py-3 px-4 text-right opacity-50 group-hover:opacity-100 transition-opacity">
-                                <div className="flex justify-end space-x-1 items-center">
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex justify-end space-x-2 items-center">
                                   {f.local_path && (
-                                    <button onClick={() => OpenFile(f.local_path)} className="px-3 py-1.5 text-xs font-bold text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-md transition-colors flex items-center space-x-1" title={t('Ochish') || 'Open'}>
-                                      <span>📂</span>
-                                      <span>{t('Open')}</span>
-                                    </button>
+                                    <button onClick={() => OpenFile(f.local_path)} className="p-1.5 text-[16px] text-[var(--text-secondary)] hover:text-white transition-colors" title={t('Ochish') || 'Open'}>📂</button>
                                   )}
-                                  <button onClick={() => handleShareLink(f.file_id)} className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded-md transition-colors" title={t('Ulashish')}>🔗</button>
-                                  <button onClick={() => handleDeleteFile(f.file_id)} className="p-1.5 text-gray-400 hover:text-danger hover:bg-danger/10 rounded-md transition-colors" title="Delete">🗑️</button>
+                                  <button onClick={() => handleShareLink(f.file_id)} className="p-1.5 text-[16px] text-[var(--text-secondary)] hover:text-white transition-colors" title={t('Ulashish')}>🔗</button>
+                                  <button onClick={() => handleDeleteFile(f.file_id)} className="p-1.5 text-[16px] text-[var(--text-secondary)] hover:text-white transition-colors" title="Delete">🗑</button>
                                 </div>
                               </td>
                             </tr>
@@ -749,23 +716,22 @@ function App() {
               {storageSubTab === 'downloads' && (
                 <>
                   {downloadedFiles.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full space-y-4 text-gray-500">
-                      <span className="text-6xl mb-2 opacity-50">📥</span>
-                      <p className="text-lg">{t('No files yet')}</p>
+                    <div className="flex flex-col items-center justify-center h-full text-[13px] text-[var(--text-muted)]">
+                      {t('No files yet')}
                     </div>
                   ) : (
-                    <div className="bg-gray-800/40 rounded-xl rounded-t-none border border-gray-700/50 overflow-y-auto max-h-[400px]">
+                    <div className="bg-[var(--bg-primary)]">
                       <table className="w-full text-left border-collapse">
-                        <thead className="bg-[#1a1f24] sticky top-0 z-10 border-b border-gray-700 text-xs uppercase text-gray-400">
+                        <thead className="bg-[var(--bg-secondary)] sticky top-0 z-10 border-b border-[var(--border)] text-[11px] uppercase text-[var(--text-secondary)] tracking-wider">
                         <tr>
-                          <th className="py-3 px-4 w-12 text-center"></th>
-                          <th className="py-3 px-4 font-medium">{t('Name')}</th>
-                          <th className="py-3 px-4 font-medium w-24">{t('Size')}</th>
-                          <th className="py-3 px-4 font-medium w-40">{t('Date')}</th>
-                          <th className="py-3 px-4 font-medium w-32 text-right">{t('Actions')}</th>
+                          <th className="py-2 px-4 w-10 text-center"></th>
+                          <th className="py-2 px-4 font-semibold">{t('Name')}</th>
+                          <th className="py-2 px-4 font-semibold w-24">{t('Size')}</th>
+                          <th className="py-2 px-4 font-semibold w-40">{t('Date')}</th>
+                          <th className="py-2 px-4 font-semibold w-32 text-right">{t('Actions')}</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-800 text-sm">
+                      <tbody className="divide-y divide-[var(--border)] text-[13px]">
                         {downloadedFiles.map((df, i) => {
                           const ext = df.file_name.split('.').pop()?.toLowerCase();
                           let icon = '📄';
@@ -782,12 +748,13 @@ function App() {
                           else sizeStr = (df.file_size/1024/1024/1024).toFixed(2) + ' GB';
 
                           return (
-                            <tr key={i} className="hover:bg-white/5 transition-colors cursor-pointer" onDoubleClick={() => OpenFile(df.local_path)}>
+                            <tr key={i} className="border-b border-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer" onDoubleClick={() => OpenFile(df.local_path)}>
                               <td className="py-3 px-4 text-center text-xl">{icon}</td>
-                              <td className="py-3 px-4 font-medium text-gray-200 max-w-[200px] truncate" title={df.file_name}>{df.file_name}</td>
-                              <td className="py-3 px-4 text-gray-400">{sizeStr}</td>
-                              <td className="py-3 px-4 text-gray-500 text-xs">{df.downloaded_at}</td>
+                              <td className="py-3 px-4 font-medium text-white max-w-[200px] truncate" title={df.file_name}>{df.file_name}</td>
+                              <td className="py-3 px-4 text-[var(--text-secondary)]">{sizeStr}</td>
+                              <td className="py-3 px-4 text-[var(--text-muted)] text-[11px]">{df.downloaded_at}</td>
                               <td className="py-3 px-4 text-right">
+                                <button onClick={() => OpenFile(df.local_path)} className="p-1.5 text-[16px] text-[var(--text-secondary)] hover:text-white transition-colors" title={t('Ochish') || 'Open'}>📂</button>
                               </td>
                             </tr>
                           );
@@ -805,17 +772,18 @@ function App() {
       )}
 
       {/* Download Modal */}
+      {/* Download Modal */}
       {showDownloadModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm p-4">
-          <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md p-6 flex flex-col space-y-4 animate-fade-in-up">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowDownloadModal(false) }}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-[8px] p-6 w-[400px] flex flex-col space-y-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-white font-bold text-lg">{t('Download via Link')}</h3>
-              <button onClick={() => setShowDownloadModal(false)} className="text-gray-500 hover:text-white transition-colors">
+              <h3 className="text-white font-semibold text-[15px]">{t('Download via Link')}</h3>
+              <button onClick={() => setShowDownloadModal(false)} className="text-[var(--text-secondary)] hover:text-white transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             
-            <p className="text-gray-400 text-sm">
+            <p className="text-[var(--text-secondary)] text-[13px]">
               {t('Paste meshweb link')}
             </p>
             
@@ -824,18 +792,18 @@ function App() {
               placeholder="meshweb://file/Qm..." 
               value={downloadLink}
               onChange={e => setDownloadLink(e.target.value)}
-              className="w-full bg-gray-900 border border-gray-700 text-white px-4 py-3 rounded-xl outline-none focus:border-primary transition-colors font-mono text-sm"
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border)] text-white p-[10px_12px] rounded-[6px] outline-none focus:border-[var(--accent)] transition-colors font-mono text-[13px]"
               autoFocus
             />
             
-            <div className="flex space-x-3 pt-2">
+            <div className="flex pt-2">
               <button 
                 onClick={() => {
                   setShowDownloadModal(false);
                   handleDownload();
                 }}
                 disabled={loading || !downloadLink}
-                className="flex-1 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold transition-transform transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:transform-none"
+                className="w-full p-[10px] bg-[var(--accent)] text-white rounded-[6px] text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50 border-none"
               >
                 Yuklab olish
               </button>
@@ -845,9 +813,9 @@ function App() {
       )}
 
       {showRentModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm p-4">
-          <div className="bg-gray-800 rounded-3xl p-8 border border-gray-700 w-full max-w-sm shadow-2xl flex flex-col items-center">
-            <h3 className="text-2xl font-bold mb-8 text-white">{t('Qancha vaqt kerak?')}</h3>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowRentModal(false) }}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-[8px] p-6 w-full max-w-sm flex flex-col items-center">
+            <h3 className="text-[15px] font-semibold mb-6 text-white">{t('Qancha vaqt kerak?')}</h3>
 
             {rentStep === 'form' && (
               <div className="space-y-6 w-full">
@@ -856,47 +824,47 @@ function App() {
                     <button 
                       key={h} 
                       onClick={() => setRentDuration(h)} 
-                      className={`py-3 rounded-2xl text-lg font-bold transition-all border-2 ${rentDuration === h ? 'bg-primary/20 border-primary text-primary' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                      className={`py-2 rounded-[6px] text-[13px] font-medium transition-colors border ${rentDuration === h ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-[var(--bg-primary)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-muted)] hover:text-white'}`}
                     >
                       {h} {h === 1 ? t('soat_1') : t('soat')}
                     </button>
                   ))}
                 </div>
 
-                <div className="text-center py-4">
-                  <span className="text-gray-400">{t('Narx')}: </span>
-                  <span className="text-xl font-bold text-success">~{rentCost.toFixed(2)} MWC</span>
+                <div className="text-center py-2">
+                  <span className="text-[13px] text-[var(--text-secondary)]">{t('Narx')}: </span>
+                  <span className="text-[15px] font-bold text-[var(--success)]">~{rentCost.toFixed(2)} MWC</span>
                 </div>
 
                 <div className="flex space-x-3 w-full">
-                  <button onClick={() => setShowRentModal(false)} className="flex-1 py-4 bg-gray-700 hover:bg-gray-600 rounded-2xl text-white font-medium transition-all">Orqaga</button>
-                  <button onClick={handleStartRent} className="flex-1 py-4 bg-success hover:bg-success/90 text-white rounded-2xl font-bold transition-all shadow-lg shadow-success/20">{t('Boshlash')}</button>
+                  <button onClick={() => setShowRentModal(false)} className="flex-1 py-2.5 bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--text-muted)] rounded-[6px] text-white text-[13px] transition-colors">Orqaga</button>
+                  <button onClick={handleStartRent} className="flex-1 py-2.5 bg-[var(--success)] hover:bg-[var(--success)]/90 text-[var(--bg-primary)] rounded-[6px] text-[13px] font-semibold transition-colors border-none">{t('Boshlash')}</button>
                 </div>
               </div>
             )}
 
             {rentStep === 'finding' && (
-              <div className="py-8 flex flex-col items-center space-y-6 w-full">
-                <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-gray-300 font-medium animate-pulse">Node qidirilmoqda...</span>
+              <div className="py-6 flex flex-col items-center space-y-4 w-full">
+                <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-[12px] text-[var(--text-secondary)] animate-pulse">Node qidirilmoqda...</span>
               </div>
             )}
 
             {rentStep === 'active' && activeRentalStats && (
               <div className="space-y-6 w-full">
-                <div className="flex flex-col items-center p-6 bg-gray-900 rounded-2xl border border-success/30">
-                  <div className="w-16 h-16 bg-success/20 rounded-full flex items-center justify-center mb-4">
-                    <span className="text-3xl">🟢</span>
+                <div className="flex flex-col items-center p-4 bg-[var(--bg-primary)] rounded-[6px] border border-[var(--success)]">
+                  <div className="w-10 h-10 bg-[var(--success)]/20 rounded-full flex items-center justify-center mb-3">
+                    <span className="text-xl">🟢</span>
                   </div>
-                  <span className="text-success font-bold text-xl">{t('Connected')}</span>
+                  <span className="text-[var(--success)] font-semibold text-[13px]">{t('Connected')}</span>
                 </div>
 
-                <div className="text-center space-y-2">
-                  <div className="text-gray-400">Qolgan vaqt: <span className="text-white font-mono font-bold">{(activeRentalStats.job.duration_hours - activeRentalStats.elapsed).toFixed(2)} hrs</span></div>
-                  <div className="text-gray-400">Sarflangan: <span className="text-danger font-bold">-{activeRentalStats.job.spent_so_far.toFixed(4)} MWC</span></div>
+                <div className="text-center space-y-2 text-[12px]">
+                  <div className="text-[var(--text-secondary)]">Qolgan vaqt: <span className="text-white font-mono">{(activeRentalStats.job.duration_hours - activeRentalStats.elapsed).toFixed(2)} hrs</span></div>
+                  <div className="text-[var(--text-secondary)]">Sarflangan: <span className="text-[var(--danger)]">-{activeRentalStats.job.spent_so_far.toFixed(4)} MWC</span></div>
                 </div>
 
-                <button onClick={handleStopRent} className="w-full py-4 bg-danger hover:bg-danger/90 text-white rounded-2xl font-bold transition-all shadow-lg shadow-danger/20">
+                <button onClick={handleStopRent} className="w-full py-2.5 bg-[var(--danger)] hover:opacity-90 text-white rounded-[6px] text-[13px] font-semibold transition-opacity border-none">
                   {t("To'xtatish")}
                 </button>
               </div>
@@ -906,51 +874,36 @@ function App() {
       )}
 
       {/* Bottom Bar */}
-      <footer className="grid grid-cols-3 gap-4 pb-2">
-        <label className={`cursor-pointer rounded-2xl flex flex-col items-center justify-center py-4 transition-all border-2 ${offerResources ? 'bg-success/20 border-success text-success shadow-[0_0_15px_rgba(74,222,128,0.2)]' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}>
-          <input type="checkbox" className="hidden" checked={offerResources} onChange={(e) => handleToggleOffer(e.target.checked)} />
-          <svg className="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-          <span className="font-bold text-sm text-center">{t('Resurs taklif qilish')}</span>
-        </label>
-
-        <button onClick={() => setActiveTab('storage')} className={`rounded-2xl flex flex-col items-center justify-center py-4 transition-all border-2 ${activeTab === 'storage' ? 'bg-primary/20 border-primary text-primary' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}>
-          <svg className="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
-          <span className="font-bold text-sm">{t('Fayllarim')}</span>
+      <footer className="h-[56px] bg-[var(--bg-primary)] border-t border-[var(--border)] grid grid-cols-3">
+        <button onClick={() => setActiveTab('dashboard')} className={`flex items-center justify-center font-medium text-[13px] transition-colors ${activeTab === 'dashboard' ? 'text-white border-t-2 border-[var(--accent)]' : 'text-[var(--text-muted)] border-t-2 border-transparent hover:text-[var(--text-secondary)]'}`}>
+          {t('Dashboard')}
         </button>
 
-        <button onClick={() => setShowSettings(true)} className="bg-gray-800 border-2 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white rounded-2xl flex flex-col items-center justify-center py-4 transition-all">
-          <svg className="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-          <span className="font-bold text-sm">{t('Sozlamalar')}</span>
+        <button onClick={() => { setActiveTab('files'); setCurrentFolder(null); }} className={`flex items-center justify-center font-medium text-[13px] transition-colors ${activeTab === 'files' ? 'text-white border-t-2 border-[var(--accent)]' : 'text-[var(--text-muted)] border-t-2 border-transparent hover:text-[var(--text-secondary)]'}`}>
+          {t('Fayllarim') || 'My Files'}
+        </button>
+
+        <button onClick={() => setShowSettings(true)} className={`flex items-center justify-center font-medium text-[13px] transition-colors ${showSettings ? 'text-white border-t-2 border-[var(--accent)]' : 'text-[var(--text-muted)] border-t-2 border-transparent hover:text-[var(--text-secondary)]'}`}>
+          {t('Sozlamalar') || 'Settings'}
         </button>
       </footer>
 
       {showSettings && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm">
-          <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 w-96 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <h3 className="text-xl font-bold mb-6 text-white text-center">{t('Sozlamalar')}</h3>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowSettings(false) }}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-6 w-[360px] flex flex-col">
+            <h3 className="text-[15px] font-semibold text-white mb-6">{t('Sozlamalar') || 'Settings'}</h3>
             
-            <div className="mb-6 space-y-4">
-              <h4 className="text-gray-400 text-sm font-bold uppercase tracking-wider">{t('Identity')}</h4>
+            <div className="mb-6 space-y-3">
+              <h4 className="text-[10px] text-[var(--text-secondary)] uppercase tracking-widest">{t('Identity')}</h4>
               
-              <div className="bg-gray-900 p-3 rounded-xl border border-gray-700 flex flex-col space-y-1">
-                <span className="text-xs text-gray-500">{t('Public Key')}</span>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-mono text-primary truncate mr-2">{myPublicKey}</span>
-                  <button onClick={() => navigator.clipboard.writeText(myPublicKey)} className="text-gray-400 hover:text-white shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  </button>
-                </div>
-              </div>
-
               <button 
                 onClick={async () => {
                   const res = await ExportIdentity();
-                  if (res.success) alert(t('Your Seed Phrase') + ':\n\n' + res.seedPhrase);
+                  if (res.success) showToast(t('Your Seed Phrase') + ':\n\n' + res.seedPhrase, 'info');
                 }}
-                className="w-full text-left px-4 py-3 rounded-xl border border-gray-700 text-gray-300 hover:bg-gray-700 transition-all flex justify-between items-center"
+                className="w-full text-left px-3 py-2 bg-[var(--bg-tertiary)] rounded-[6px] border border-[var(--border)] text-[var(--text-secondary)] hover:text-white hover:border-[var(--text-muted)] transition-colors flex justify-between items-center text-[13px]"
               >
                 <span>{t('Show Seed Phrase')}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
               </button>
 
               <button 
@@ -965,66 +918,77 @@ function App() {
                     a.click();
                   }
                 }}
-                className="w-full text-left px-4 py-3 rounded-xl border border-gray-700 text-gray-300 hover:bg-gray-700 transition-all flex justify-between items-center"
+                className="w-full text-left px-3 py-2 bg-[var(--bg-tertiary)] rounded-[6px] border border-[var(--border)] text-[var(--text-secondary)] hover:text-white hover:border-[var(--text-muted)] transition-colors flex justify-between items-center text-[13px]"
               >
                 <span>{t('Export Identity')}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
               </button>
 
               <button 
                 onClick={handleRegisterAssoc}
-                className="w-full text-left px-4 py-3 rounded-xl border border-gray-700 text-gray-300 hover:bg-gray-700 transition-all flex justify-between items-center"
+                className="w-full text-left px-3 py-2 bg-[var(--bg-tertiary)] rounded-[6px] border border-[var(--border)] text-[var(--text-secondary)] hover:text-white hover:border-[var(--text-muted)] transition-colors flex justify-between items-center text-[13px]"
               >
                 <span>{t('Register .meshweb')}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
               </button>
 
               <button 
                 onClick={() => { setShowSettings(false); setShowLogs(true); }}
-                className="w-full text-left px-4 py-3 rounded-xl border border-gray-700 text-gray-300 hover:bg-gray-700 transition-all flex justify-between items-center"
+                className="w-full text-left px-3 py-2 bg-[var(--bg-tertiary)] rounded-[6px] border border-[var(--border)] text-[var(--text-secondary)] hover:text-white hover:border-[var(--text-muted)] transition-colors flex justify-between items-center text-[13px]"
               >
                 <span>{t("Loglarni ko'rish")}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               </button>
             </div>
 
-            <div className="mb-6 space-y-4">
-              <h4 className="text-gray-400 text-sm font-bold uppercase tracking-wider">{t('Language')}</h4>
-              <div className="space-y-2">
-                <button onClick={() => changeLang('uz')} className={`w-full text-left px-4 py-2 rounded-xl border transition-all ${lang==='uz' ? 'border-primary bg-primary/10 text-primary' : 'border-gray-700 text-gray-300 hover:bg-gray-700'}`}>🇺🇿 O'zbek</button>
-                <button onClick={() => changeLang('ru')} className={`w-full text-left px-4 py-2 rounded-xl border transition-all ${lang==='ru' ? 'border-primary bg-primary/10 text-primary' : 'border-gray-700 text-gray-300 hover:bg-gray-700'}`}>🇷🇺 Русский</button>
-                <button onClick={() => changeLang('en')} className={`w-full text-left px-4 py-2 rounded-xl border transition-all ${lang==='en' ? 'border-primary bg-primary/10 text-primary' : 'border-gray-700 text-gray-300 hover:bg-gray-700'}`}>🇬🇧 English</button>
+            <div className="w-full h-[1px] bg-[var(--border)] mb-6"></div>
+
+            <div className="space-y-3">
+              <h4 className="text-[10px] text-[var(--text-secondary)] uppercase tracking-widest">{t('Language')}</h4>
+              <div className="flex flex-col space-y-2">
+                <button onClick={() => changeLang('uz')} className={`w-full text-left px-3 py-2 rounded-[6px] border text-[13px] transition-colors ${lang==='uz' ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--bg-primary)]' : 'border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-tertiary)] hover:border-[var(--text-muted)]'}`}>🇺🇿 O'zbek</button>
+                <button onClick={() => changeLang('ru')} className={`w-full text-left px-3 py-2 rounded-[6px] border text-[13px] transition-colors ${lang==='ru' ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--bg-primary)]' : 'border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-tertiary)] hover:border-[var(--text-muted)]'}`}>🇷🇺 Русский</button>
+                <button onClick={() => changeLang('en')} className={`w-full text-left px-3 py-2 rounded-[6px] border text-[13px] transition-colors ${lang==='en' ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--bg-primary)]' : 'border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-tertiary)] hover:border-[var(--text-muted)]'}`}>🇬🇧 English</button>
               </div>
             </div>
-
-            <button onClick={() => setShowSettings(false)} className="w-full bg-gray-700 hover:bg-gray-600 py-3 rounded-xl text-white font-medium transition-all mt-auto">
-              {t('Close')}
-            </button>
           </div>
         </div>
       )}
 
       {showLogs && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm p-4 md:p-6">
-          <div className="bg-[#0D1117] rounded-2xl border border-gray-700 w-full max-w-3xl h-[80vh] flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-gray-800">
-              <h3 className="text-gray-300 font-bold tracking-wider">{t('Activity Log')}</h3>
-              <button onClick={() => setShowLogs(false)} className="text-gray-500 hover:text-white transition-colors">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowLogs(false) }}>
+          <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-[8px] w-[90%] max-w-3xl h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-[var(--border)]">
+              <h3 className="text-white text-[13px] font-semibold tracking-wider">{t('Activity Log')}</h3>
+              <button onClick={() => setShowLogs(false)} className="text-[var(--text-secondary)] hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="flex-grow overflow-y-auto p-4 space-y-2 font-mono text-sm custom-scrollbar">
+            <div className="flex-grow overflow-y-auto p-4 space-y-2 font-mono text-[12px] custom-scrollbar">
               {logs.length === 0 ? (
-                <div className="text-gray-600 italic">{t('No activity yet')}</div>
+                <div className="text-[var(--text-muted)] italic">{t('No activity yet')}</div>
               ) : (
-                logs.map((log, i) => (
-                  <div key={i} className="animate-fade-in">
-                    <span className="text-gray-500 mr-2">[{new Date().toLocaleTimeString()}]</span>
-                    <span className={`${log.includes('Xato') || log.includes('Error') ? 'text-danger' : log.includes('✅') ? 'text-success' : 'text-gray-300'}`}>
-                      {log}
+                logs.map((log, i) => {
+                  let logColor = 'text-[#CCCCCC]';
+                  if (log.includes('Xato') || log.includes('Error') || log.includes('[Error]')) logColor = 'text-[var(--danger)]';
+                  else if (log.includes('✅')) logColor = 'text-[var(--success)]';
+
+                  // Extract prefix if exists
+                  const prefixMatch = log.match(/^(\[.*?\])\s(.*)/);
+                  let prefix = '';
+                  let text = log;
+                  if (prefixMatch) {
+                    prefix = prefixMatch[1];
+                    text = prefixMatch[2];
+                  }
+
+                  return (
+                  <div key={i} className="animate-fade-in flex space-x-2">
+                    <span className="text-[var(--text-muted)] shrink-0">[{new Date().toLocaleTimeString()}]</span>
+                    <span className={logColor}>
+                      {prefix && <span className="text-[var(--text-secondary)] mr-2">{prefix}</span>}
+                      {text}
                     </span>
                   </div>
-                ))
+                  );
+                })
               )}
               <div ref={logsEndRef} />
             </div>
@@ -1034,24 +998,37 @@ function App() {
 
       {/* Compute Coming Soon Modal */}
       {showComputeModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in backdrop-blur-sm p-4">
-          <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-sm p-8 flex flex-col items-center space-y-6 text-center animate-fade-in-up">
-            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-              <span className="text-4xl">⚡</span>
-            </div>
-            <div>
-              <h3 className="text-white font-bold text-xl mb-2">Compute Market</h3>
-              <p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">
-                {t('Compute coming soon text')}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowComputeModal(false)}
-              className="w-full py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold transition-all transform hover:scale-[1.02] active:scale-95"
-            >
-              OK
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowComputeModal(false) }}>
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-8 w-[360px] flex flex-col items-center text-center">
+            <span className="text-4xl mb-4">⚡</span>
+            <h3 className="text-[15px] font-semibold text-white mb-2">Compute Market</h3>
+            <p className="text-[13px] text-[var(--text-secondary)] mb-6">
+              AI modellarni o'rgatish va yurgizish uchun markazlashmagan hisoblash quvvati tez kunda qo'shiladi.
+            </p>
+            <button onClick={() => setShowComputeModal(false)} className="w-full py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] text-white rounded-[6px] text-[13px] hover:border-[var(--text-muted)] transition-colors">
+              {t('Yopish') || 'Close'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+            position: 'fixed',
+            bottom: '80px',
+            right: '20px',
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            borderLeft: `3px solid ${toast.type === 'error' ? 'var(--danger)' : 'var(--success)'}`,
+            color: 'var(--text-primary)',
+            padding: '10px 14px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            zIndex: 9999,
+            animation: 'fadeIn 0.2s ease'
+        }}>
+            {toast.message}
         </div>
       )}
     </div>
